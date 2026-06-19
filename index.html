@@ -619,7 +619,7 @@
       renderDepartures(patterns);
 
       const now2 = new Date();
-      const timeStr = pad(now2.getHours()) + ':' + pad(now2.getMinutes()) + ':' + pad(now2.getSeconds());
+      const timeStr = pad(now2.getHours()) + ':' + pad(now2.getMinutes());
       setStatus('ok', 'Oppdatert ' + timeStr);
       startProgressBar();
 
