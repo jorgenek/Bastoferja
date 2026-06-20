@@ -134,7 +134,7 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    .card:first-child {
+    .card.next-dep {
       border-color: var(--accent);
     }
 
@@ -149,7 +149,7 @@
       grid-column: 1;
     }
 
-    .card:first-child .dep-time {
+    .card.next-dep .dep-time {
       color: var(--accent);
     }
 
@@ -449,12 +449,13 @@
 
 <div class="date-row">
   <button class="date-nav-btn" id="prev-day-btn" onclick="shiftDay(-1)" style="display:none">‹</button>
-  <button class="date-display" onclick="document.getElementById('date-input').showPicker()">
+  <label class="date-display" style="position:relative;overflow:hidden;cursor:pointer"
+    onclick="try{document.getElementById('date-input').showPicker()}catch(e){}">
     <span id="date-display-text"></span>
     <span style="font-size:12px;opacity:0.5;margin-left:6px">📅</span>
-  </button>
-  <input type="date" id="date-input" onchange="onDateChange()"
-    style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+    <input type="date" id="date-input" onchange="onDateChange()"
+      style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer" />
+  </label>
   <button class="date-nav-btn" onclick="shiftDay(1)">›</button>
 </div>
 
@@ -697,6 +698,7 @@
     const line = direction === 'horten' ? 'Horten–Moss' : 'Moss–Horten';
     container.innerHTML = '';
     let shownNextDay = false;
+    let firstCard = true;
     calls.forEach((c) => {
       const depISO = c.expectedDepartureTime || c.aimedDepartureTime;
       const mins   = minutesUntil(depISO);
@@ -713,7 +715,8 @@
       }
 
       const card = document.createElement('div');
-      card.className = 'card';
+      card.className = 'card' + (isToday && firstCard ? ' next-dep' : '');
+      firstCard = false;
       card.setAttribute('role', 'article');
       card.setAttribute('data-dep-iso', depISO);
       card.setAttribute('aria-label', 'Avgang ' + fmtHHMM(depISO));
