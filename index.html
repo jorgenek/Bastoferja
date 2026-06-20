@@ -614,7 +614,7 @@
 
   function onDateChange() {
     const inp = document.getElementById('date-input');
-    if (!inp.value) inp.value = selectedDate;
+    if (!inp.value || inp.value < todayISO()) inp.value = todayISO();
     selectedDate = inp.value;
     showAll = selectedDate !== todayISO();
     updateControls();
