@@ -112,7 +112,11 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
+      max-height: 460px;
+      overflow-y: auto;
+      scrollbar-width: none;
     }
+    #departures::-webkit-scrollbar { display: none; }
 
     .card {
       background: rgba(13, 17, 23, 0.82);
@@ -167,8 +171,18 @@
       font-size: 14px;
       color: var(--muted);
       grid-row: 2;
-      grid-column: 1 / -1;
+      grid-column: 1;
       margin-top: 4px;
+    }
+
+    .arr-time {
+      font-size: 14px;
+      color: var(--muted);
+      grid-row: 2;
+      grid-column: 2;
+      margin-top: 4px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
 
     .skeleton {
@@ -190,6 +204,25 @@
     @keyframes shimmer {
       0%   { background-position: -200% 0; }
       100% { background-position:  200% 0; }
+    }
+
+    .day-separator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .day-separator::before,
+    .day-separator::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #1e293b;
     }
 
     .error-card {
@@ -327,6 +360,72 @@
       color: var(--muted);
       margin-top: 4px;
     }
+
+    .date-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+      align-items: center;
+    }
+    .date-display {
+      flex: 1;
+      position: relative;
+      background: rgba(13,17,23,0.82);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 14px;
+      cursor: pointer;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      transition: border-color 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .date-display:active { border-color: var(--accent); }
+    .date-input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+      border: none;
+      background: none;
+    }
+    .date-nav-btn {
+      background: rgba(13,17,23,0.82);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 16px;
+      color: var(--text);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      flex-shrink: 0;
+    }
+    .date-nav-btn:active { border-color: var(--accent); }
+
+    .date-today-btn {
+      background: rgba(13,17,23,0.82);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .date-today-btn:active { border-color: var(--accent); color: var(--accent); }
+
   </style>
 </head>
 <body>
@@ -347,6 +446,17 @@
 </header>
 
 <div id="notices" aria-live="polite"></div>
+
+<div class="date-row">
+  <button class="date-nav-btn" id="prev-day-btn" onclick="shiftDay(-1)" style="display:none">‹</button>
+  <button class="date-display" onclick="document.getElementById('date-input').showPicker()">
+    <span id="date-display-text"></span>
+    <span style="font-size:12px;opacity:0.5;margin-left:6px">📅</span>
+  </button>
+  <input type="date" id="date-input" onchange="onDateChange()"
+    style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+  <button class="date-nav-btn" onclick="shiftDay(1)">›</button>
+</div>
 
 <div id="departures" aria-live="polite" aria-label="Neste avganger">
   <div class="skeleton"></div>
@@ -461,20 +571,21 @@
 
   const API   = 'https://api.entur.io/journey-planner/v3/graphql';
   const QUERY = `
-    query NextFerries($dt: DateTime!, $from: Location!, $to: Location!) {
-      trip(
-        from: $from
-        to: $to
-        dateTime: $dt
-        numTripPatterns: 7
-      ) {
-        tripPatterns {
-          legs {
-            aimedStartTime
-            expectedStartTime
-            aimedEndTime
-            expectedEndTime
-
+    query FerrySchedule($stopId: String!, $startTime: DateTime!, $timeRange: Int!) {
+      stopPlace(id: $stopId) {
+        estimatedCalls(
+          startTime: $startTime
+          timeRange: $timeRange
+          numberOfDepartures: 200
+        ) {
+          aimedDepartureTime
+          expectedDepartureTime
+          serviceJourney {
+            line { transportMode }
+            passingTimes {
+              quay { stopPlace { id } }
+              arrival { time dayOffset }
+            }
           }
         }
       }
@@ -485,6 +596,59 @@
   let barTimer = null;
   let countdownInterval = null;
   const REFRESH_SECS = 60;
+
+  function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  let selectedDate = todayISO();
+
+  function initDateInput() {
+    const inp = document.getElementById('date-input');
+    inp.min = todayISO();
+    inp.value = selectedDate;
+    updateControls();
+  }
+
+  function onDateChange() {
+    const inp = document.getElementById('date-input');
+    if (!inp.value) inp.value = selectedDate;
+    selectedDate = inp.value;
+    showAll = selectedDate !== todayISO();
+    updateControls();
+    fetchDepartures();
+  }
+
+  function shiftDay(delta) {
+    const d = new Date(selectedDate + 'T12:00:00');
+    d.setDate(d.getDate() + delta);
+    const next = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    if (next < todayISO()) return;
+    selectedDate = next;
+    document.getElementById('date-input').value = selectedDate;
+    updateControls();
+    fetchDepartures();
+  }
+
+  function goToToday() {
+    selectedDate = todayISO();
+    showAll = false;
+    document.getElementById('date-input').value = selectedDate;
+    updateControls();
+    fetchDepartures();
+  }
+
+  function fmtSelectedDate() {
+    const d = new Date(selectedDate + 'T12:00:00');
+    return d.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  function updateControls() {
+    const isToday = selectedDate === todayISO();
+    document.getElementById('prev-day-btn').style.display = isToday ? 'none' : '';
+    document.getElementById('date-display-text').textContent = isToday ? 'I dag' : fmtSelectedDate();
+  }
 
   function pad(n) { return String(n).padStart(2, '0'); }
 
@@ -512,51 +676,104 @@
     return 'ok';
   }
 
-  function renderDepartures(patterns) {
+  let lastRenderedKey = null;
+
+  function renderDepartures(calls, isToday) {
     const container = document.getElementById('departures');
-    if (!patterns || patterns.length === 0) {
-      container.innerHTML = '<div class="error-card">Ingen avganger funnet de neste timene.</div>';
+    if (!calls || calls.length === 0) {
+      lastRenderedKey = null;
+      container.innerHTML = '<div class="error-card">Ingen avganger funnet.</div>';
       return;
     }
 
+    const key = calls.map(c => c.aimedDepartureTime).join(',') + '|' + isToday;
+    if (key === lastRenderedKey) {
+      // Same departures — only update countdowns in place, no DOM rebuild
+      if (isToday) updateCountdowns(calls);
+      return;
+    }
+    lastRenderedKey = key;
+
+    const line = direction === 'horten' ? 'Horten–Moss' : 'Moss–Horten';
     container.innerHTML = '';
-    patterns.forEach((p, i) => {
-      const leg   = p.legs[0];
-      const depISO = leg.expectedStartTime || leg.aimedStartTime;
-      const mins  = minutesUntil(depISO);
-      const line  = direction === 'horten' ? 'Horten–Moss' : 'Moss–Horten';
+    let shownNextDay = false;
+    calls.forEach((c) => {
+      const depISO = c.expectedDepartureTime || c.aimedDepartureTime;
+      const mins   = minutesUntil(depISO);
+
+      const depDate = new Date(depISO);
+      const depLocalDate = depDate.getFullYear() + '-' +
+        pad(depDate.getMonth() + 1) + '-' + pad(depDate.getDate());
+      if (!shownNextDay && depLocalDate !== selectedDate) {
+        shownNextDay = true;
+        const sep = document.createElement('div');
+        sep.className = 'day-separator';
+        sep.textContent = 'Natt / neste dag';
+        container.appendChild(sep);
+      }
 
       const card = document.createElement('div');
       card.className = 'card';
       card.setAttribute('role', 'article');
-      card.setAttribute('aria-label', 'Avgang ' + fmtHHMM(depISO) + ', ' + countdownText(mins));
+      card.setAttribute('data-dep-iso', depISO);
+      card.setAttribute('aria-label', 'Avgang ' + fmtHHMM(depISO));
 
-      const arrISO = leg.expectedEndTime || leg.aimedEndTime;
-      const arrStr = arrISO ? ' → ' + fmtHHMM(arrISO) : '';
+      const countdownHtml = isToday && mins <= 120
+        ? '<span class="countdown ' + countdownClass(mins) + '">' + countdownText(mins) + '</span>'
+        : '';
+
+      const destId = currentTo();
+      const destPassing = (c.serviceJourney.passingTimes || [])
+        .find(pt => pt.quay && pt.quay.stopPlace && pt.quay.stopPlace.id === destId);
+      let arrISO = null;
+      if (destPassing && destPassing.arrival && destPassing.arrival.time) {
+        const base = new Date(depISO);
+        const [h, m] = destPassing.arrival.time.split(':').map(Number);
+        base.setDate(base.getDate() + (destPassing.arrival.dayOffset || 0));
+        base.setHours(h, m, 0, 0);
+        arrISO = base.toISOString();
+      }
+      const arrHtml = arrISO
+        ? '<span class="arr-time">→ ' + fmtHHMM(arrISO) + '</span>'
+        : '';
 
       card.innerHTML =
         '<span class="dep-time">' + fmtHHMM(depISO) + '</span>' +
-        '<span class="countdown ' + countdownClass(mins) + '">' + countdownText(mins) + '</span>' +
-        '<span class="line-name">' + escHtml(line) + arrStr + '</span>';
+        countdownHtml +
+        '<span class="line-name">' + escHtml(line) + '</span>' +
+        arrHtml;
 
       container.appendChild(card);
     });
 
-    startCountdownUpdate(patterns);
+    if (isToday) startCountdownUpdate(calls);
+  }
+
+  function updateCountdowns(calls) {
+    calls.forEach(c => {
+      const depISO = c.expectedDepartureTime || c.aimedDepartureTime;
+      const card = document.querySelector('.card[data-dep-iso="' + depISO + '"]');
+      if (!card) return;
+      const mins = minutesUntil(depISO);
+      const cdEl = card.querySelector('.countdown');
+      if (cdEl) {
+        cdEl.textContent = countdownText(mins);
+        cdEl.className   = 'countdown ' + countdownClass(mins);
+      }
+    });
   }
 
   function escHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  function startCountdownUpdate(patterns) {
+  function startCountdownUpdate(calls) {
     if (countdownInterval) clearInterval(countdownInterval);
     countdownInterval = setInterval(() => {
       const cards = document.querySelectorAll('.card');
-      patterns.forEach((p, i) => {
+      calls.forEach((c, i) => {
         if (!cards[i]) return;
-        const leg    = p.legs[0];
-        const depISO = leg.expectedStartTime || leg.aimedStartTime;
+        const depISO = c.expectedDepartureTime || c.aimedDepartureTime;
         const mins   = minutesUntil(depISO);
         const cdEl   = cards[i].querySelector('.countdown');
         if (cdEl) {
@@ -586,11 +803,27 @@
   async function fetchDepartures() {
     setStatus('spin', 'Henter avganger…');
 
-    if (refreshTimer)  clearTimeout(refreshTimer);
+    if (refreshTimer) clearTimeout(refreshTimer);
     if (countdownInterval) clearInterval(countdownInterval);
 
+    const isToday = selectedDate === todayISO();
+    let dt, timeRange;
+    const endOfDay = new Date(selectedDate + 'T23:59:59');
+    endOfDay.setMinutes(endOfDay.getMinutes() + 91); // extend to ~01:30 next day to catch late night departures
+    if (isToday) {
+      dt = new Date().toISOString();
+      timeRange = Math.max(60, Math.floor((endOfDay - Date.now()) / 1000));
+    } else {
+      const offset = -new Date().getTimezoneOffset();
+      const sign = offset >= 0 ? '+' : '-';
+      const oh = pad(Math.floor(Math.abs(offset) / 60));
+      const om = pad(Math.abs(offset) % 60);
+      dt = selectedDate + 'T00:00:00' + sign + oh + ':' + om;
+      const startOfQuery = new Date(selectedDate + 'T00:00:00');
+      timeRange = Math.floor((endOfDay - startOfQuery) / 1000);
+    }
+
     try {
-      const now = new Date().toISOString();
       const res = await fetch(API, {
         method: 'POST',
         headers: {
@@ -600,9 +833,9 @@
         body: JSON.stringify({
           query: QUERY,
           variables: {
-            dt: now,
-            from: { place: currentFrom() },
-            to:   { place: currentTo() }
+            stopId: currentFrom(),
+            startTime: dt,
+            timeRange
           }
         })
       });
@@ -612,16 +845,17 @@
       const json = await res.json();
       if (json.errors && json.errors.length) throw new Error(json.errors[0].message);
 
-      const all = json.data?.trip?.tripPatterns || [];
-      const patterns = all
-        .filter(p => minutesUntil(p.legs[0].expectedStartTime || p.legs[0].aimedStartTime) >= 0)
-        .slice(0, 5);
-      renderDepartures(patterns);
+      const all = (json.data?.stopPlace?.estimatedCalls || [])
+        .filter(c => c.serviceJourney?.line?.transportMode === 'water');
+      const calls = isToday
+        ? all.filter(c => minutesUntil(c.expectedDepartureTime || c.aimedDepartureTime) >= 0)
+        : all;
+      renderDepartures(calls, isToday);
 
       const now2 = new Date();
       const timeStr = pad(now2.getHours()) + ':' + pad(now2.getMinutes());
       setStatus('ok', 'Oppdatert ' + timeStr);
-      startProgressBar();
+      if (isToday) startProgressBar();
 
     } catch (err) {
       console.error(err);
@@ -630,7 +864,7 @@
         '<div class="error-card">Kunne ikke hente avganger.<br><small>' + escHtml(err.message) + '</small></div>';
     }
 
-    refreshTimer = setTimeout(fetchDepartures, REFRESH_SECS * 1000);
+    if (isToday) refreshTimer = setTimeout(fetchDepartures, REFRESH_SECS * 1000);
   }
 
   if ('serviceWorker' in navigator) {
@@ -643,6 +877,7 @@
     if (document.visibilityState === 'visible') fetchDepartures();
   });
 
+  initDateInput();
   fetchNotices();
   setInterval(fetchNotices, 10 * 60 * 1000);
 
